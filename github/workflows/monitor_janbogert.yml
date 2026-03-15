@@ -1,0 +1,48 @@
+name: Jan Bogert Tesla Monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Download previous state
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: janbogert-state
+          path: .
+          workflow: monitor_janbogert.yml
+          workflow_conclusion: success
+          if_no_artifact_found: ignore
+        continue-on-error: true
+
+      - name: Run monitor
+        env:
+          MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+        run: python monitor_janbogert.py
+
+      - name: Save state
+        uses: actions/upload-artifact@v4
+        with:
+          name: janbogert-state
+          path: |
+            janbogert_state.json
+            janbogert_history.json
+          retention-days: 30
+          overwrite: true
