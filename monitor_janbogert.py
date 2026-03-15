@@ -40,93 +40,63 @@ def fetch_cars():
         print(f"  Błąd pobierania: {e}")
         return cars
 
-    # Znajdź wszystkie linki do ogłoszeń Tesli Model 3
-    # Format: /occasions/NUMER-tesla-model-3-.../
-    blocks = re.findall(
-        r'<a\s+href="(https://janbogert\.nl/occasions/\d+-tesla-model-3-[^"]+)"[^>]*>(.*?)</a>',
-        html, re.DOTALL
-    )
+    # Podziel HTML na bloki po divach vehicle
+    # Każdy blok zawiera data-filters, data-sorting, href, h2, type, year, meter
+    vehicle_blocks = re.split(r'(?=<div[^>]+class="vehicle car)', html)
+    print(f"  Bloków vehicle: {len(vehicle_blocks)}")
 
-    # Lepiej parsować bloki kart ogłoszeń
-    # Każda karta wygląda jak: <a href="..."><img ...><h2>Tesla Model 3</h2>... rok ... km ... cena</a>
-    car_pattern = re.findall(
-        r'href="(https://janbogert\.nl/occasions/(\d+)-tesla-model-3-[^"]+)".*?'
-        r'<h2[^>]*>(.*?)</h2>.*?'
-        r'(\d{4})\s*</.*?'
-        r'([\d\.]+)\s*km.*?'
-        r'€\s*([\d\.]+),-',
-        html, re.DOTALL
-    )
-
-    if not car_pattern:
-        # Fallback: parsuj sekcje osobno
-        # Wyciągnij wszystkie bloki <a href="/occasions/NNN-tesla...">...</a>
-        sections = re.split(r'(?=<a\s+href="https://janbogert\.nl/occasions/\d+-tesla)', html)
-        for section in sections:
-            try:
-                url_match = re.search(r'href="(https://janbogert\.nl/occasions/(\d+)-tesla-model-3-[^"]+)"', section)
-                if not url_match:
-                    continue
-                url    = url_match.group(1)
-                car_id = url_match.group(2)
-
-                title_match = re.search(r'<h2[^>]*>(.*?)</h2>', section, re.DOTALL)
-                if not title_match:
-                    continue
-                title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip()
-                title = re.sub(r'\s+', ' ', title).strip()
-
-                year_match = re.search(r'\b(201[5-9]|202[0-5])\b', section)
-                year = int(year_match.group(1)) if year_match else 0
-
-                km_match = re.search(r'([\d\.]+)\s*km', section)
-                mileage = 0
-                mileage_str = ""
-                if km_match:
-                    mileage_str = km_match.group(0).strip()
-                    mileage = int(re.sub(r'[^\d]', '', km_match.group(1)))
-
-                price_match = re.search(r'€\s*([\d\.]+),-', section)
-                price = 0
-                if price_match:
-                    price = int(re.sub(r'[^\d]', '', price_match.group(1)))
-
-                # Filtruj
-                if price > MAX_EUR:
-                    continue
-                if mileage and mileage > MAX_KM:
-                    continue
-                if year and (year < MIN_YEAR or year > MAX_YEAR):
-                    continue
-                if not price or not year:
-                    continue
-
-                cars[car_id] = {
-                    "id":          car_id,
-                    "url":         url,
-                    "title":       title,
-                    "year":        year,
-                    "price":       price,
-                    "mileage":     mileage,
-                    "mileage_str": mileage_str,
-                }
-            except Exception as e:
-                print(f"  Błąd parsowania sekcji: {e}")
-        return cars
-
-    for url, car_id, title, year, km_raw, price_raw in car_pattern:
+    for block in vehicle_blocks:
         try:
-            title   = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', title)).strip()
-            year    = int(year)
-            mileage = int(re.sub(r'[^\d]', '', km_raw))
-            price   = int(re.sub(r'[^\d]', '', price_raw))
+            # Wyciągnij data-filters
+            df_match = re.search(r'data-filters="([^"]+)"', block)
+            ds_match = re.search(r'data-sorting="([^"]+)"', block)
+            if not df_match or not ds_match:
+                continue
 
+            df = json.loads(df_match.group(1).replace("&quot;", '"'))
+            ds = json.loads(ds_match.group(1).replace("&quot;", '"'))
+
+            # Tylko Tesla Model 3
+            if df.get("brand") != "tesla" or df.get("model") != "model-3":
+                continue
+
+            price   = int(df.get("price", 0))
+            mileage = int(df.get("odometerCount", 0))
+
+            # Rok z HTML
+            year_match = re.search(r'<span[^>]*class="year"[^>]*>(\d{4})</span>', block)
+            year = int(year_match.group(1)) if year_match else 0
+
+            # Filtruj
             if price > MAX_EUR:
                 continue
             if mileage > MAX_KM:
                 continue
-            if year < MIN_YEAR or year > MAX_YEAR:
+            if not year or year < MIN_YEAR or year > MAX_YEAR:
                 continue
+
+            # URL
+            href_match = re.search(r'href="([^"]+)"', block)
+            rel_url = href_match.group(1) if href_match else ""
+            if rel_url.startswith("http"):
+                url = rel_url
+            else:
+                url = f"https://janbogert.nl/occasions/{rel_url.lstrip('/')}"
+
+            # ID z data-sorting
+            slug   = ds.get("title", "")
+            car_id = slug.split("-")[-1] if slug else rel_url.split("-")[0]
+
+            # Tytuł
+            h2_match   = re.search(r'<h2[^>]*>([^<]+)</h2>', block)
+            type_match = re.search(r'<span[^>]*class="type"[^>]*>([^<]+)</span>', block)
+            brand_model = h2_match.group(1).strip() if h2_match else "Tesla Model 3"
+            car_type    = type_match.group(1).strip() if type_match else ""
+            title = f"{brand_model} {car_type}".strip()
+
+            # Przebieg jako string
+            meter_match = re.search(r'<span[^>]*class="meter"[^>]*>([^<]+)</span>', block)
+            mileage_str = meter_match.group(1).strip() if meter_match else f"{mileage:,} km".replace(",", ".")
 
             cars[car_id] = {
                 "id":          car_id,
@@ -135,10 +105,10 @@ def fetch_cars():
                 "year":        year,
                 "price":       price,
                 "mileage":     mileage,
-                "mileage_str": f"{mileage:,} km".replace(",", "."),
+                "mileage_str": mileage_str,
             }
         except Exception as e:
-            print(f"  Błąd parsowania: {e}")
+            print(f"  Błąd parsowania bloku: {e}")
 
     return cars
 
