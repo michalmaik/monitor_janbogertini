@@ -1,5 +1,4 @@
 import json
-import time
 import re
 import os
 from datetime import datetime, timezone
@@ -8,16 +7,14 @@ import requests
 # ── Konfiguracja ─────────────────────────────────────────────────────────────
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1482706376999567451/V-RAPCZVTlZVJFibiDmjueJeN8ftw9YZZ0xliGj8oXlSTwb7kzMVfsT_o6h5MG8wyMFV"
-SOURCE_URL       = "https://janbogert.nl/occasions/?brand=tesla&model=model-3&fuel=e"
+SOURCE_URL      = "https://janbogert.nl/occasions/?brand=tesla&model=model-3&fuel=e"
+STATE_FILE      = "janbogert_state.json"
+HISTORY_FILE    = "janbogert_history.json"
 
-STATE_FILE   = "janbogert_state.json"
-HISTORY_FILE = "janbogert_history.json"
-
-# Filtry
-MAX_EUR      = 19010
-MAX_KM       = 135000
-MAX_YEAR     = 2021
-MIN_YEAR     = 2018
+MAX_EUR  = 19010
+MAX_KM   = 135000
+MAX_YEAR = 2021
+MIN_YEAR = 2018
 
 HEADERS = {
     "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -40,14 +37,11 @@ def fetch_cars():
         print(f"  Błąd pobierania: {e}")
         return cars
 
-    # Podziel HTML na bloki po divach vehicle
-    # Każdy blok zawiera data-filters, data-sorting, href, h2, type, year, meter
     vehicle_blocks = re.split(r'(?=<div[^>]+class="vehicle car)', html)
     print(f"  Bloków vehicle: {len(vehicle_blocks)}")
 
     for block in vehicle_blocks:
         try:
-            # Wyciągnij data-filters
             df_match = re.search(r'data-filters="([^"]+)"', block)
             ds_match = re.search(r'data-sorting="([^"]+)"', block)
             if not df_match or not ds_match:
@@ -56,45 +50,31 @@ def fetch_cars():
             df = json.loads(df_match.group(1).replace("&quot;", '"'))
             ds = json.loads(ds_match.group(1).replace("&quot;", '"'))
 
-            # Tylko Tesla Model 3
             if df.get("brand") != "tesla" or df.get("model") != "model-3":
                 continue
 
             price   = int(df.get("price", 0))
             mileage = int(df.get("odometerCount", 0))
 
-            # Rok z HTML
             year_match = re.search(r'<span[^>]*class="year"[^>]*>(\d{4})</span>', block)
             year = int(year_match.group(1)) if year_match else 0
 
-            # Filtruj
-            if price > MAX_EUR:
-                continue
-            if mileage > MAX_KM:
-                continue
-            if not year or year < MIN_YEAR or year > MAX_YEAR:
+            if price > MAX_EUR or mileage > MAX_KM or not year or year < MIN_YEAR or year > MAX_YEAR:
                 continue
 
-            # URL
             href_match = re.search(r'href="([^"]+)"', block)
-            rel_url = href_match.group(1) if href_match else ""
-            if rel_url.startswith("http"):
-                url = rel_url
-            else:
-                url = f"https://janbogert.nl/occasions/{rel_url.lstrip('/')}"
+            rel_url    = href_match.group(1) if href_match else ""
+            url        = rel_url if rel_url.startswith("http") else f"https://janbogert.nl/occasions/{rel_url.lstrip('/')}"
 
-            # ID z data-sorting
             slug   = ds.get("title", "")
             car_id = slug.split("-")[-1] if slug else rel_url.split("-")[0]
 
-            # Tytuł
-            h2_match   = re.search(r'<h2[^>]*>([^<]+)</h2>', block)
-            type_match = re.search(r'<span[^>]*class="type"[^>]*>([^<]+)</span>', block)
+            h2_match    = re.search(r'<h2[^>]*>([^<]+)</h2>', block)
+            type_match  = re.search(r'<span[^>]*class="type"[^>]*>([^<]+)</span>', block)
             brand_model = h2_match.group(1).strip() if h2_match else "Tesla Model 3"
             car_type    = type_match.group(1).strip() if type_match else ""
-            title = f"{brand_model} {car_type}".strip()
+            title       = f"{brand_model} {car_type}".strip()
 
-            # Przebieg jako string
             meter_match = re.search(r'<span[^>]*class="meter"[^>]*>([^<]+)</span>', block)
             mileage_str = meter_match.group(1).strip() if meter_match else f"{mileage:,} km".replace(",", ".")
 
@@ -160,10 +140,10 @@ def format_price_history(entries):
     lines = []
     prev  = None
     for entry in entries[-5:]:
-        if prev is None:              trend = ""
-        elif entry["price"] < prev:   trend = " 📉"
-        elif entry["price"] > prev:   trend = " 📈"
-        else:                         trend = ""
+        if prev is None:             trend = ""
+        elif entry["price"] < prev:  trend = " 📉"
+        elif entry["price"] > prev:  trend = " 📈"
+        else:                        trend = ""
         lines.append(f"{entry['date']}: €{entry['price']:,}{trend}".replace(",", " "))
         prev = entry["price"]
     return "\n".join(lines)
@@ -180,14 +160,12 @@ def send_discord(embeds):
 
 
 def build_new_car_embed(car):
-    url     = car.get("url", "")
-    title   = car.get("title", "Tesla Model 3")
     price   = car.get("price", 0)
     year    = car.get("year", "—")
     mileage = car.get("mileage_str", "—") or "—"
-
+    url     = car.get("url", "")
     lines = [
-        f"🇳🇱 **{title}**",
+        f"🇳🇱 **{car.get('title', 'Tesla Model 3')}**",
         f"💰 €{price:,}".replace(",", " "),
         f"📅 {year}  |  🛣️ {mileage}",
         f"🔗 [Zobacz na janbogert.nl]({url})",
@@ -201,23 +179,18 @@ def build_new_car_embed(car):
 
 
 def build_price_drop_embed(car, old_price, new_price, history):
-    url      = car.get("url", "")
-    title    = car.get("title", "Tesla Model 3")
-    year     = car.get("year", "—")
-    mileage  = car.get("mileage_str", "—") or "—"
-    diff     = old_price - new_price
-    pct      = round((old_price - new_price) / old_price * 100, 1)
-
+    diff = old_price - new_price
+    pct  = round((old_price - new_price) / old_price * 100, 1)
+    url  = car.get("url", "")
     lines = [
-        f"🇳🇱 **{title}**",
+        f"🇳🇱 **{car.get('title', 'Tesla Model 3')}**",
         f"💰 €{old_price:,} → €{new_price:,} (-€{diff:,}, -{pct}%)".replace(",", " "),
-        f"📅 {year}  |  🛣️ {mileage}",
+        f"📅 {car.get('year','—')}  |  🛣️ {car.get('mileage_str','—') or '—'}",
         f"🔗 [Zobacz na janbogert.nl]({url})",
     ]
     history_str = format_price_history(history.get(car.get("id", ""), []))
     if history_str:
         lines.append(f"\n📊 Historia:\n{history_str}")
-
     return {
         "title":       "📉 Spadek ceny w Jan Bogert!",
         "description": "\n".join(lines),
@@ -229,34 +202,29 @@ def build_price_drop_embed(car, old_price, new_price, history):
 def build_test_embed(current_cars):
     lines = []
     for car in sorted(current_cars.values(), key=lambda x: x.get("price", 0)):
-        price   = car.get("price", 0)
-        title   = car.get("title", "?")[:35]
-        url     = car.get("url", "")
-        mileage = car.get("mileage_str", "") or ""
-        year    = car.get("year", "")
-        lines.append(f"[{title}]({url}) — €{price:,} · {year} · {mileage}".replace(",", " "))
+        title = car.get("title", "?")[:35]
+        price = car.get("price", 0)
+        year  = car.get("year", "")
+        km    = car.get("mileage_str", "") or ""
+        url   = car.get("url", "")
+        lines.append(f"[{title}]({url}) — €{price:,} · {year} · {km}".replace(",", " "))
 
     description = "\n".join(lines[:20])
     if len(current_cars) > 20:
-        description += f"\n... i {len(current_cars)-20} więcej"
+        description += f"\n... i {len(current_cars) - 20} więcej"
 
     return {
         "title":       "🔧 Test — Jan Bogert bot działa!",
-        "description": description if description else "Brak aut spełniających kryteria.",
+        "description": description or "Brak aut spełniających kryteria.",
         "color":       0x3498db,
         "fields": [
-            {"name": "Aut w ofercie", "value": str(len(current_cars)),         "inline": True},
-            {"name": "Filtr ceny",    "value": f"max €{MAX_EUR:,}".replace(",", " "), "inline": True},
-            {"name": "Filtr km",      "value": f"max {MAX_KM:,} km".replace(",", " "), "inline": True},
-            {"name": "Roczniki",      "value": f"{MIN_YEAR}–{MAX_YEAR}",       "inline": True},
+            {"name": "Aut w ofercie", "value": str(len(current_cars)),                                "inline": True},
+            {"name": "Filtr ceny",    "value": f"max €{MAX_EUR:,}".replace(",", " "),                 "inline": True},
+            {"name": "Filtr km",      "value": f"max {MAX_KM:,} km".replace(",", " "),               "inline": True},
+            {"name": "Roczniki",      "value": f"{MIN_YEAR}–{MAX_YEAR}",                              "inline": True},
         ],
         "footer": {"text": f"Jan Bogert Monitor · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"},
     }
-
-
-def should_send_daily_summary():
-    now = datetime.now(timezone.utc)
-    return now.hour == 8 and now.minute < 15
 
 
 def build_daily_summary_embed(current_cars):
@@ -269,37 +237,42 @@ def build_daily_summary_embed(current_cars):
         }
     lines = []
     for car in sorted(current_cars.values(), key=lambda x: x.get("price", 0)):
-        price   = car.get("price", 0)
-        title   = car.get("title", "?")[:50]
-        url     = car.get("url", "")
-        mileage = car.get("mileage_str", "") or ""
-        year    = car.get("year", "")
-        lines.append(f"[{title}]({url}) — €{price:,} · {year} · {mileage}".replace(",", " "))
+        title = car.get("title", "?")[:40]
+        price = car.get("price", 0)
+        year  = car.get("year", "")
+        km    = car.get("mileage_str", "") or ""
+        url   = car.get("url", "")
+        lines.append(f"[{title}]({url}) — €{price:,} · {year} · {km}".replace(",", " "))
 
+    description = "\n".join(lines[:25])
     return {
         "title":       f"📊 Dzienne podsumowanie — {len(current_cars)} aut",
         "description": f"Filtr: {MIN_YEAR}–{MAX_YEAR}, max €{MAX_EUR:,}, max {MAX_KM:,} km".replace(",", " "),
         "color":       0x3498db,
-        "fields": [{"name": "Auta", "value": "\n".join(lines[:25]) or "brak", "inline": False}],
+        "fields": [{"name": "Auta", "value": description or "brak", "inline": False}],
         "footer":      {"text": f"Jan Bogert Monitor · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"},
     }
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def should_send_daily_summary():
+    now = datetime.now(timezone.utc)
+    return now.hour == 8 and now.minute < 15
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     is_manual = os.environ.get("MANUAL_RUN", "false").lower() == "true"
-
-    now = datetime.now(timezone.utc)
+    now       = datetime.now(timezone.utc)
     print(f"[{now.isoformat()}] Start monitorowania Jan Bogert...")
 
     is_first_run = not os.path.exists(STATE_FILE)
-    print(f"  Plik stanu: {STATE_FILE}, istnieje: {os.path.exists(STATE_FILE)}")
+    print(f"  Plik stanu: {STATE_FILE}, istnieje: {not is_first_run}")
     if is_first_run:
         print("  ⚠️  Pierwsze uruchomienie — zapisuję stan BEZ wysyłania powiadomień.")
 
     print("\nPobieram auta...")
-    current_cars = fetch_cars()
+    current_cars   = fetch_cars()
     print(f"Aut znalezionych: {len(current_cars)}")
 
     previous_state = load_state()
@@ -331,10 +304,10 @@ def main():
 
     save_state({
         car_id: {
-            "price":       car.get("price"),
-            "title":       car.get("title", ""),
-            "url":         car.get("url", ""),
-            "seen_at":     now.strftime("%Y-%m-%d %H:%M"),
+            "price":   car.get("price"),
+            "title":   car.get("title", ""),
+            "url":     car.get("url", ""),
+            "seen_at": now.strftime("%Y-%m-%d %H:%M"),
         }
         for car_id, car in current_cars.items()
     })
