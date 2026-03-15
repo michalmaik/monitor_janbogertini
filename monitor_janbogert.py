@@ -174,6 +174,8 @@ def format_price_history(entries):
 def send_discord(embeds):
     resp = requests.post(DISCORD_WEBHOOK, json={"embeds": embeds}, timeout=10)
     print(f"  Discord: {resp.status_code}")
+    if not resp.ok:
+        print(f"  Discord error: {resp.text[:200]}")
     resp.raise_for_status()
 
 
@@ -348,8 +350,11 @@ def main():
         print("  Wysłano dzienne podsumowanie.")
 
     if is_manual:
-        send_discord([build_test_embed(current_cars)])
-        print("  Wysłano powiadomienie testowe.")
+        try:
+            send_discord([build_test_embed(current_cars)])
+            print("  Wysłano powiadomienie testowe.")
+        except Exception as e:
+            print(f"  Błąd powiadomienia testowego: {e}")
     elif not embeds_new and not embeds_drops:
         print("Brak zmian.")
 
