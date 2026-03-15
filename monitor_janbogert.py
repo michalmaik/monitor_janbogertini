@@ -14,7 +14,7 @@ STATE_FILE   = "janbogert_state.json"
 HISTORY_FILE = "janbogert_history.json"
 
 # Filtry
-MAX_EUR      = 18900
+MAX_EUR      = 19010
 MAX_KM       = 135000
 MAX_YEAR     = 2021
 MIN_YEAR     = 2018
