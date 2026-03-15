@@ -32,6 +32,9 @@ jobs:
           if_no_artifact_found: ignore
         continue-on-error: true
 
+      - name: Debug state
+        run: ls -la *.json 2>/dev/null || echo "Brak JSON"
+
       - name: Run monitor
         env:
           MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
