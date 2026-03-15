@@ -230,15 +230,19 @@ def build_test_embed(current_cars):
     lines = []
     for car in sorted(current_cars.values(), key=lambda x: x.get("price", 0)):
         price   = car.get("price", 0)
-        title   = car.get("title", "?")
+        title   = car.get("title", "?")[:35]
         url     = car.get("url", "")
         mileage = car.get("mileage_str", "") or ""
         year    = car.get("year", "")
-        lines.append(f"🇳🇱 [{title}]({url}) — €{price:,} · {year} · {mileage}".replace(",", " "))
+        lines.append(f"[{title}]({url}) — €{price:,} · {year} · {mileage}".replace(",", " "))
+
+    description = "\n".join(lines[:20])
+    if len(current_cars) > 20:
+        description += f"\n... i {len(current_cars)-20} więcej"
 
     return {
         "title":       "🔧 Test — Jan Bogert bot działa!",
-        "description": "\n".join(lines) if lines else "Brak aut spełniających kryteria.",
+        "description": description if description else "Brak aut spełniających kryteria.",
         "color":       0x3498db,
         "fields": [
             {"name": "Aut w ofercie", "value": str(len(current_cars)),         "inline": True},
@@ -290,6 +294,7 @@ def main():
     print(f"[{now.isoformat()}] Start monitorowania Jan Bogert...")
 
     is_first_run = not os.path.exists(STATE_FILE)
+    print(f"  Plik stanu: {STATE_FILE}, istnieje: {os.path.exists(STATE_FILE)}")
     if is_first_run:
         print("  ⚠️  Pierwsze uruchomienie — zapisuję stan BEZ wysyłania powiadomień.")
 
